@@ -6,7 +6,7 @@ Captures context automatically via hooks (PreCompact, SessionStart), stores in S
 provides search tools via MCP protocol.
 
 ## Stack
-- **Runtime:** Python 3.11+
+- **Runtime:** Python 3.12 (managed by uv)
 - **MCP:** stdio transport (no HTTP server needed)
 - **Storage:** SQLite + FTS5 (full-text search)
 - **Hooks:** Claude Code lifecycle hooks (PreCompact, SessionStart)
