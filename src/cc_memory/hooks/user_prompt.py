@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 from cc_memory.config import DB_PATH, detect_project
 from cc_memory.storage import Storage
+
+# Sanitize session_id: allow only alphanumeric, dash, underscore
+_SAFE_ID_RE = re.compile(r"[^a-zA-Z0-9_-]")
 
 # Keywords that indicate a decision or task in user prompt
 DECISION_PATTERNS = [
@@ -25,9 +28,21 @@ TASK_PATTERNS = [
 SAVE_EVERY_N = 10
 
 
+def _counter_dir() -> Path:
+    """Per-user temp directory for counter files."""
+    base = Path(tempfile.gettempdir()) / "cc-memory"
+    base.mkdir(mode=0o700, exist_ok=True)
+    return base
+
+
 def _counter_path(session_id: str) -> Path:
-    """Path to prompt counter file for this session."""
-    return Path(f"/tmp/cc-memory-{session_id}.count")
+    """Path to prompt counter file for this session (sanitized)."""
+    safe_id = _SAFE_ID_RE.sub("_", session_id)[:128]
+    path = _counter_dir() / f"{safe_id}.count"
+    # Verify resolved path stays within counter dir
+    if not str(path.resolve()).startswith(str(_counter_dir().resolve())):
+        return _counter_dir() / "invalid.count"
+    return path
 
 
 def get_counter(session_id: str) -> int:
@@ -76,7 +91,9 @@ def run(stdin_data: str, db_path: str | None = None) -> dict:
 
     session_id = hook_input.get("session_id", "unknown")
     prompt = hook_input.get("prompt", "")
-    cwd = hook_input.get("cwd", os.getcwd())
+    cwd = hook_input.get("cwd")
+    if not cwd:
+        return {}
     project = detect_project(cwd)
 
     if not prompt:
@@ -97,19 +114,18 @@ def run(stdin_data: str, db_path: str | None = None) -> dict:
     if memories:
         effective_db = db_path or DB_PATH
         try:
-            storage = Storage(effective_db)
-            storage.init_db()
-            for mem in memories:
-                storage.save(session_id, project, mem["type"], mem["content"])
-            storage.close()
-        except Exception:
-            pass
+            with Storage(effective_db) as storage:
+                storage.init_db()
+                for mem in memories:
+                    storage.save(session_id, project, mem["type"], mem["content"])
+        except Exception as e:
+            print(f"CC-Memory warning: {e}", file=sys.stderr)
 
     # Non-blocking: no additionalContext needed
     return {}
 
 
-def main():
+def main() -> None:
     """Entry point for cc-memory-user-prompt hook."""
     stdin_data = sys.stdin.read()
     result = run(stdin_data)

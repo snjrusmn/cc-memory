@@ -135,6 +135,22 @@ class TestPrivacyFiltering:
         assert not extractor._is_sensitive("normal code content")
         assert not extractor._is_sensitive("src/storage.py")
 
+    def test_is_sensitive_detects_ssh_keys(self, extractor):
+        assert extractor._is_sensitive("file id_rsa found")
+        assert extractor._is_sensitive("id_ed25519 detected")
+
+    def test_is_sensitive_detects_connection_strings(self, extractor):
+        assert extractor._is_sensitive("postgresql://user:pass@host/db")
+        assert extractor._is_sensitive("mongodb://localhost:27017")
+
+    def test_is_sensitive_detects_aws_keys(self, extractor):
+        assert extractor._is_sensitive("AKIAIOSFODNN7EXAMPLE")
+        assert extractor._is_sensitive("aws_secret_access_key = abc")
+
+    def test_is_sensitive_detects_cert_files(self, extractor):
+        assert extractor._is_sensitive("loaded cert.pem")
+        assert extractor._is_sensitive("keystore.p12")
+
 
 # ── extract_all ──────────────────────────────────────────────────
 

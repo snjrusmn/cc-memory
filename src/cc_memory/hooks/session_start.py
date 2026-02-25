@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 from cc_memory.config import DB_PATH, detect_project
-from cc_memory.storage import Storage
+from cc_memory.storage import Memory, Storage
 
 
-def format_context(project: str, memories: list) -> str:
+def format_context(project: str, memories: list[Memory]) -> str:
     """Format memories as structured markdown for Claude context."""
     if not memories:
         return ""
@@ -70,19 +69,22 @@ def run(stdin_data: str, db_path: str | None = None) -> dict:
     except json.JSONDecodeError:
         return {}
 
-    cwd = hook_input.get("cwd", os.getcwd())
+    cwd = hook_input.get("cwd")
+    if not cwd:
+        return {}
     project = detect_project(cwd)
 
-    effective_db = db_path or DB_PATH
-    if not db_path and not Path(effective_db).exists():
+    # Skip if no DB exists yet (first run, no memories saved yet)
+    if db_path is None and not Path(DB_PATH).exists():
         return {}
+    effective_db = db_path or DB_PATH
 
     try:
-        storage = Storage(effective_db)
-        storage.init_db()
-        memories = storage.recent(project, limit=20)
-        storage.close()
-    except Exception:
+        with Storage(effective_db) as storage:
+            storage.init_db()
+            memories = storage.recent(project, limit=20)
+    except Exception as e:
+        print(f"CC-Memory warning: {e}", file=sys.stderr)
         return {}
 
     if not memories:
@@ -97,7 +99,7 @@ def run(stdin_data: str, db_path: str | None = None) -> dict:
     }
 
 
-def main():
+def main() -> None:
     """Entry point for cc-memory-session-start hook."""
     stdin_data = sys.stdin.read()
     result = run(stdin_data)

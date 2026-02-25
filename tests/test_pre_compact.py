@@ -6,11 +6,22 @@ from pathlib import Path
 
 import pytest
 
+import cc_memory.hooks.pre_compact as pre_compact_mod
 from cc_memory.hooks.pre_compact import run, detect_project
 from cc_memory.storage import Storage
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SAMPLE = FIXTURES / "sample_transcript.jsonl"
+
+
+@pytest.fixture(autouse=True)
+def _allow_test_paths(monkeypatch, tmp_path):
+    """Allow test fixture and tmp_path directories for path validation."""
+    monkeypatch.setattr(
+        pre_compact_mod,
+        "_ALLOWED_TRANSCRIPT_PARENTS",
+        [FIXTURES.parent, tmp_path, Path.home() / ".claude", Path("/tmp")],
+    )
 
 
 @pytest.fixture
@@ -91,7 +102,7 @@ class TestRun:
 
     def test_missing_transcript(self, db_path):
         result = run(_make_input(transcript_path="/nonexistent/path.jsonl"), db_path=db_path)
-        assert "no transcript" in result.get("systemMessage", "").lower()
+        assert "not found" in result.get("systemMessage", "").lower()
 
     def test_empty_transcript(self, db_path, tmp_path):
         empty_file = tmp_path / "empty.jsonl"
@@ -104,3 +115,24 @@ class TestRun:
         msg = result["systemMessage"]
         # Should include type counts like "3 file_changes, 2 decisions"
         assert "decision" in msg or "file_change" in msg or "error" in msg
+
+    def test_rejects_path_outside_allowed_dirs(self, db_path, monkeypatch):
+        """Transcript path outside allowed dirs is rejected."""
+        monkeypatch.setattr(
+            pre_compact_mod, "_ALLOWED_TRANSCRIPT_PARENTS", [Path("/allowed_only")]
+        )
+        result = run(
+            _make_input(transcript_path=str(SAMPLE)),
+            db_path=db_path,
+        )
+        assert "outside allowed" in result.get("systemMessage", "").lower()
+
+    def test_missing_cwd_returns_error(self, db_path):
+        """Missing cwd field returns error."""
+        inp = json.dumps({
+            "session_id": "s1",
+            "transcript_path": str(SAMPLE),
+            "hook_event_name": "PreCompact",
+        })
+        result = run(inp, db_path=db_path)
+        assert "missing cwd" in result.get("systemMessage", "").lower()

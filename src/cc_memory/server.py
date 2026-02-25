@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import atexit
+
 from mcp.server.fastmcp import FastMCP
 
 from cc_memory.config import DB_PATH
-from cc_memory.storage import Storage, VALID_TYPES
+from cc_memory.storage import Storage, VALID_TYPES, MAX_LIMIT
 
 mcp = FastMCP("cc-memory")
 
 _storage: Storage | None = None
+
+
+def _truncate(text: str, max_len: int = 200) -> str:
+    """Truncate text with ellipsis indicator."""
+    return text[:max_len] + "..." if len(text) > max_len else text
 
 
 def get_storage() -> Storage:
@@ -18,6 +25,7 @@ def get_storage() -> Storage:
     if _storage is None:
         _storage = Storage(DB_PATH)
         _storage.init_db()
+        atexit.register(_storage.close)
     return _storage
 
 
@@ -48,8 +56,8 @@ def memory_save(
     try:
         mid = storage.save(session_id, project, type, content, metadata)
         return f"Saved memory #{mid} ({type}) for project '{project}'"
-    except ValueError as e:
-        return f"Error: {e}"
+    except ValueError:
+        return f"Error: invalid memory type '{type}'. Must be one of: {', '.join(sorted(VALID_TYPES))}"
 
 
 @mcp.tool()
@@ -73,7 +81,7 @@ def memory_search(
         return "No memories found."
     lines = []
     for m in results:
-        lines.append(f"[#{m.id}] ({m.type}) {m.project} — {m.content[:200] + ("..." if len(m.content) > 200 else "")}")
+        lines.append(f"[#{m.id}] ({m.type}) {m.project} — {_truncate(m.content)}")
     return "\n".join(lines)
 
 
@@ -94,7 +102,7 @@ def memory_recent(
         return f"No memories for project '{project}'."
     lines = []
     for m in results:
-        lines.append(f"[#{m.id}] ({m.type}) {m.created_at} — {m.content[:200] + ("..." if len(m.content) > 200 else "")}")
+        lines.append(f"[#{m.id}] ({m.type}) {m.created_at} — {_truncate(m.content)}")
     return "\n".join(lines)
 
 
@@ -117,7 +125,7 @@ def memory_project(
         return f"No memories for project '{project}'."
     lines = []
     for m in results:
-        lines.append(f"[#{m.id}] ({m.type}) {m.created_at} — {m.content[:200] + ("..." if len(m.content) > 200 else "")}")
+        lines.append(f"[#{m.id}] ({m.type}) {m.created_at} — {_truncate(m.content)}")
     return "\n".join(lines)
 
 
@@ -138,7 +146,7 @@ def memory_session(
         return f"No memories for session '{session_id}'."
     lines = []
     for m in results:
-        lines.append(f"[#{m.id}] ({m.type}) {m.project} — {m.content[:200] + ("..." if len(m.content) > 200 else "")}")
+        lines.append(f"[#{m.id}] ({m.type}) {m.project} — {_truncate(m.content)}")
     return "\n".join(lines)
 
 
@@ -157,7 +165,7 @@ def memory_forget(
     return f"Memory #{memory_id} not found."
 
 
-def main():
+def main() -> None:
     """Entry point for cc-memory-server."""
     mcp.run(transport="stdio")
 

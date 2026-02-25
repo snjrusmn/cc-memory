@@ -10,7 +10,7 @@ stores in SQLite + FTS5, provides search tools via MCP protocol (stdio transport
 - **MCP:** FastMCP with stdio transport
 - **Storage:** SQLite + FTS5 (full-text search)
 - **Hooks:** Claude Code lifecycle hooks (PreCompact, SessionStart, UserPromptSubmit)
-- **Tests:** pytest (134 tests)
+- **Tests:** pytest (158 tests)
 
 ## Architecture
 ```
@@ -50,14 +50,14 @@ CC-Memory/
 │       ├── pre_compact.py    — PreCompact: extract & save before /compact
 │       ├── session_start.py  — SessionStart: inject recent memories as context
 │       └── user_prompt.py    — UserPromptSubmit: keyword detection + checkpoints
-├── tests/                    — 134 pytest tests
+├── tests/                    — 158 pytest tests
 │   ├── fixtures/             — sample JSONL transcript
-│   ├── test_storage.py       — 49 tests
+│   ├── test_storage.py       — 63 tests
 │   ├── test_server.py        — 22 tests
-│   ├── test_extractor.py     — 23 tests
-│   ├── test_pre_compact.py   — 11 tests
+│   ├── test_extractor.py     — 27 tests
+│   ├── test_pre_compact.py   — 13 tests
 │   ├── test_session_start.py — 13 tests
-│   ├── test_user_prompt.py   — 14 tests
+│   ├── test_user_prompt.py   — 19 tests
 │   └── test_install.py       — 3 tests
 ├── scripts/
 │   └── install.sh        — install/uninstall (--dry-run supported)

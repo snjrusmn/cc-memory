@@ -17,6 +17,14 @@ SENSITIVE_PATTERNS = [
     re.compile(r"api[_.]?key", re.IGNORECASE),
     re.compile(r"private[_.]?key", re.IGNORECASE),
     re.compile(r"<private>.*?</private>", re.DOTALL),
+    # SSH keys and certificates
+    re.compile(r"\bid_rsa\b|\bid_ed25519\b|ssh_host_.*_key", re.IGNORECASE),
+    re.compile(r"\.pem\b|\.p12\b|\.pfx\b", re.IGNORECASE),
+    # Connection strings with embedded credentials
+    re.compile(r"(?:postgresql|mysql|mongodb|redis)://[^\s]+", re.IGNORECASE),
+    # AWS credentials
+    re.compile(r"\bAKIA[A-Z0-9]{16}\b"),
+    re.compile(r"aws_secret_access_key", re.IGNORECASE),
 ]
 
 # Task patterns in assistant text
@@ -150,7 +158,7 @@ class Extractor:
                 r"(?:decided|chose|выбрали|решили)[:\s]+(.+?)(?:\n|$)",
             ]:
                 for match in re.finditer(pattern, text, re.IGNORECASE):
-                    content = match.group(0).strip()
+                    content = match.group(1).strip()
                     if content and not self._is_sensitive(content):
                         decisions.append({"type": "decision", "content": content})
 

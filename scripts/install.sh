@@ -64,10 +64,11 @@ if ! $DRY_RUN; then
     uv sync
 fi
 
-# 2. Create DB directory
-dry "Create DB directory: $DB_DIR"
+# 2. Create DB directory with restrictive permissions
+dry "Create DB directory: $DB_DIR (mode 700)"
 if ! $DRY_RUN; then
     mkdir -p "$DB_DIR"
+    chmod 700 "$DB_DIR"
 fi
 
 # 3. Add MCP server to Claude Code
@@ -83,10 +84,10 @@ if [ -f "$SETTINGS_FILE" ] && command -v jq &>/dev/null; then
     if ! $DRY_RUN; then
         tmp=$(mktemp)
 
-        # PreCompact hook
-        PRE_COMPACT_CMD="uv run --directory $PROJECT_DIR cc-memory-pre-compact"
-        SESSION_START_CMD="uv run --directory $PROJECT_DIR cc-memory-session-start"
-        USER_PROMPT_CMD="uv run --directory $PROJECT_DIR cc-memory-user-prompt"
+        # PreCompact hook (quoted path for spaces support)
+        PRE_COMPACT_CMD="uv run --directory \"$PROJECT_DIR\" cc-memory-pre-compact"
+        SESSION_START_CMD="uv run --directory \"$PROJECT_DIR\" cc-memory-session-start"
+        USER_PROMPT_CMD="uv run --directory \"$PROJECT_DIR\" cc-memory-user-prompt"
 
         jq --arg pc "$PRE_COMPACT_CMD" --arg ss "$SESSION_START_CMD" --arg up "$USER_PROMPT_CMD" '
             # Ensure hooks object exists

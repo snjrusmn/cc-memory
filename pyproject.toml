@@ -5,7 +5,7 @@ description = "Persistent memory bank for Claude Code via MCP"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "mcp>=1.0",
+    "mcp>=1.0,<2.0",
 ]
 
 [project.scripts]
@@ -17,7 +17,6 @@ cc-memory-user-prompt = "cc_memory.hooks.user_prompt:main"
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.24",
 ]
 
 [build-system]
@@ -29,4 +28,3 @@ packages = ["src/cc_memory"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"

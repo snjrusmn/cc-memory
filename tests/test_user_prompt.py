@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import cc_memory.hooks.user_prompt as user_prompt_mod
 from cc_memory.hooks.user_prompt import (
     run,
     detect_keywords,
@@ -22,11 +23,11 @@ def db_path(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _clean_counter():
-    """Clean up counter files after each test."""
-    yield
-    for p in Path("/tmp").glob("cc-memory-test-*.count"):
-        p.unlink(missing_ok=True)
+def _use_tmp_counter_dir(tmp_path, monkeypatch):
+    """Use tmp_path for counter files instead of shared temp dir."""
+    counter_dir = tmp_path / "cc-memory-counters"
+    counter_dir.mkdir()
+    monkeypatch.setattr(user_prompt_mod, "_counter_dir", lambda: counter_dir)
 
 
 def _make_input(prompt="Hello", session_id="test-session", cwd="/home/user/my-project"):
@@ -50,14 +51,12 @@ class TestPromptCounter:
         assert increment_counter(sid) == 1
         assert increment_counter(sid) == 2
         assert increment_counter(sid) == 3
-        _counter_path(sid).unlink(missing_ok=True)
 
     def test_persists_across_calls(self):
         sid = "test-counter-persist"
         increment_counter(sid)
         increment_counter(sid)
         assert get_counter(sid) == 2
-        _counter_path(sid).unlink(missing_ok=True)
 
 
 # ── keyword detection ────────────────────────────────────────────
@@ -173,3 +172,33 @@ class TestRun:
     def test_empty_prompt(self, db_path):
         result = run(_make_input(prompt=""), db_path=db_path)
         assert result == {}
+
+    def test_missing_cwd_returns_empty(self, db_path):
+        """Missing cwd field returns empty dict."""
+        inp = json.dumps({
+            "session_id": "s1",
+            "prompt": "hello",
+            "hook_event_name": "UserPromptSubmit",
+        })
+        result = run(inp, db_path=db_path)
+        assert result == {}
+
+
+# ── session_id sanitization ─────────────────────────────────────
+
+
+class TestSessionIdSanitization:
+    def test_sanitizes_special_chars(self):
+        """Session ID with special chars gets sanitized for filename."""
+        path = _counter_path("../../etc/cron.d/evil")
+        assert ".." not in str(path.name)
+        assert "/" not in str(path.name)
+
+    def test_truncates_long_session_id(self):
+        long_id = "a" * 300
+        path = _counter_path(long_id)
+        assert len(path.name) < 200
+
+    def test_normal_session_id_unchanged(self):
+        path = _counter_path("abc-123_test")
+        assert "abc-123_test" in str(path.name)

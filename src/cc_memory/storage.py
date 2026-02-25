@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class Memory:
     """A single memory record."""
 
@@ -28,8 +30,11 @@ VALID_TYPES = frozenset(
     {"decision", "file_change", "task", "learning", "error", "brainstorm"}
 )
 
+MAX_LIMIT = 500
+MAX_CONTENT_LENGTH = 50_000
+
 # Characters/words that need escaping in FTS5 queries
-_FTS5_SPECIAL = re.compile(r'["\'\*\(\)\{\}\+\:\^\-]')
+_FTS5_SPECIAL = re.compile(r'["\'\*\(\)\{\}\+\:\^\-\.\\;/]')
 _FTS5_KEYWORDS = {"AND", "OR", "NOT", "NEAR"}
 
 
@@ -58,18 +63,21 @@ class Storage:
             self.conn = sqlite3.connect(":memory:")
         else:
             path = Path(db_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             self.conn = sqlite3.connect(str(path))
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
 
     def init_db(self) -> None:
         """Create tables and FTS5 index."""
-        self.conn.executescript("""
+        types_check = ", ".join(f"'{t}'" for t in sorted(VALID_TYPES))
+        self.conn.executescript(f"""
             CREATE TABLE IF NOT EXISTS memories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
                 project TEXT NOT NULL,
-                type TEXT NOT NULL CHECK(type IN ('decision','file_change','task','learning','error','brainstorm')),
+                type TEXT NOT NULL CHECK(type IN ({types_check})),
                 content TEXT NOT NULL,
                 metadata JSON,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -114,6 +122,8 @@ class Storage:
         """Save a memory and return its id."""
         if type not in VALID_TYPES:
             raise ValueError(f"Invalid type '{type}'. Must be one of: {sorted(VALID_TYPES)}")
+        if len(content) > MAX_CONTENT_LENGTH:
+            content = content[:MAX_CONTENT_LENGTH] + "... [truncated]"
         meta_json = json.dumps(metadata, ensure_ascii=False) if metadata else None
         cur = self.conn.execute(
             "INSERT INTO memories (session_id, project, type, content, metadata) VALUES (?, ?, ?, ?, ?)",
@@ -121,6 +131,10 @@ class Storage:
         )
         self.conn.commit()
         return cur.lastrowid  # type: ignore[return-value]
+
+    @staticmethod
+    def _clamp_limit(limit: int) -> int:
+        return max(1, min(limit, MAX_LIMIT))
 
     def search(
         self,
@@ -134,6 +148,7 @@ class Storage:
         if not sanitized:
             return []
 
+        limit = self._clamp_limit(limit)
         conditions = ["memories_fts MATCH ?"]
         params: list[Any] = [sanitized]
 
@@ -159,12 +174,14 @@ class Storage:
                 """,
                 params,
             ).fetchall()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as e:
+            logger.warning("FTS5 query failed: %s (query: %s)", e, sanitized)
             return []
         return [self._row_to_memory(r) for r in rows]
 
     def recent(self, project: str, limit: int = 20) -> list[Memory]:
         """Get most recent memories for a project."""
+        limit = self._clamp_limit(limit)
         rows = self.conn.execute(
             "SELECT * FROM memories WHERE project = ? ORDER BY created_at DESC, id DESC LIMIT ?",
             (project, limit),
@@ -175,6 +192,7 @@ class Storage:
         self, project: str, type: str | None = None, limit: int = 50
     ) -> list[Memory]:
         """Get all memories for a project, optionally filtered by type."""
+        limit = self._clamp_limit(limit)
         if type:
             rows = self.conn.execute(
                 "SELECT * FROM memories WHERE project = ? AND type = ? ORDER BY created_at DESC, id DESC LIMIT ?",
@@ -189,6 +207,7 @@ class Storage:
 
     def by_session(self, session_id: str, limit: int = 50) -> list[Memory]:
         """Get all memories for a session."""
+        limit = self._clamp_limit(limit)
         rows = self.conn.execute(
             "SELECT * FROM memories WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
             (session_id, limit),

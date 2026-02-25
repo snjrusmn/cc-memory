@@ -2,7 +2,7 @@
 
 import pytest
 
-from cc_memory.storage import Memory, Storage, VALID_TYPES, _sanitize_fts_query
+from cc_memory.storage import Memory, Storage, VALID_TYPES, MAX_LIMIT, MAX_CONTENT_LENGTH, _sanitize_fts_query
 
 
 # ── init_db ──────────────────────────────────────────────────────
@@ -320,3 +320,110 @@ class TestFtsQuerySanitizer:
     def test_escapes_minus(self):
         result = _sanitize_fts_query("include -exclude")
         assert "-" not in result
+
+    def test_escapes_dot(self):
+        result = _sanitize_fts_query("file.name")
+        assert "." not in result
+
+    def test_escapes_backslash(self):
+        result = _sanitize_fts_query("path\\to\\file")
+        assert "\\" not in result
+
+    def test_escapes_semicolon(self):
+        result = _sanitize_fts_query("stmt; DROP TABLE")
+        assert ";" not in result
+
+    def test_escapes_slash(self):
+        result = _sanitize_fts_query("NEAR/3 word")
+        assert "/" not in result
+
+
+# ── WAL mode ────────────────────────────────────────────────────
+
+
+class TestWalMode:
+    def test_wal_mode_enabled(self, storage):
+        mode = storage.conn.execute("PRAGMA journal_mode").fetchone()[0]
+        # :memory: DBs use "memory" journal mode, not WAL
+        # WAL is only for file-based DBs
+        assert mode in ("wal", "memory")
+
+    def test_busy_timeout_set(self, storage):
+        timeout = storage.conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert timeout == 5000
+
+
+# ── limit clamping ──────────────────────────────────────────────
+
+
+class TestLimitClamping:
+    def test_clamp_negative_to_one(self, storage):
+        for i in range(5):
+            storage.save("s1", "proj", "decision", f"item {i}")
+        results = storage.recent("proj", limit=-1)
+        assert len(results) == 1
+
+    def test_clamp_zero_to_one(self, storage):
+        storage.save("s1", "proj", "decision", "item")
+        results = storage.recent("proj", limit=0)
+        assert len(results) == 1
+
+    def test_clamp_huge_to_max(self, storage):
+        storage.save("s1", "proj", "decision", "item")
+        # Should not crash with huge limit
+        results = storage.recent("proj", limit=999999999)
+        assert len(results) == 1
+
+
+# ── content length limit ────────────────────────────────────────
+
+
+class TestContentLengthLimit:
+    def test_truncates_long_content(self, storage):
+        long_content = "x" * (MAX_CONTENT_LENGTH + 100)
+        mid = storage.save("s1", "proj", "decision", long_content)
+        row = storage.conn.execute(
+            "SELECT content FROM memories WHERE id = ?", (mid,)
+        ).fetchone()
+        assert len(row["content"]) <= MAX_CONTENT_LENGTH + 20  # allow for truncation marker
+        assert row["content"].endswith("... [truncated]")
+
+    def test_normal_content_not_truncated(self, storage):
+        content = "short content"
+        mid = storage.save("s1", "proj", "decision", content)
+        row = storage.conn.execute(
+            "SELECT content FROM memories WHERE id = ?", (mid,)
+        ).fetchone()
+        assert row["content"] == content
+
+
+# ── frozen Memory dataclass ─────────────────────────────────────
+
+
+class TestFrozenMemory:
+    def test_memory_is_immutable(self, storage):
+        storage.save("s1", "proj", "decision", "test")
+        results = storage.recent("proj")
+        m = results[0]
+        with pytest.raises(AttributeError):
+            m.content = "mutated"
+
+    def test_memory_is_hashable(self, storage):
+        storage.save("s1", "proj", "decision", "test")
+        results = storage.recent("proj")
+        # Frozen dataclass should be hashable
+        assert hash(results[0]) is not None
+
+
+# ── DB directory permissions ────────────────────────────────────
+
+
+class TestDbPermissions:
+    def test_creates_dir_with_restricted_permissions(self, tmp_path):
+        db_file = tmp_path / "new_dir" / "test.db"
+        s = Storage(str(db_file))
+        s.init_db()
+        s.close()
+        import stat
+        mode = db_file.parent.stat().st_mode & 0o777
+        assert mode == 0o700

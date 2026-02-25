@@ -183,7 +183,7 @@ CC-Memory/
 │       ├── pre_compact.py  # PreCompact: extract & save before /compact
 │       ├── session_start.py # SessionStart: inject memories into context
 │       └── user_prompt.py  # UserPromptSubmit: keyword detection
-├── tests/                  # 134 pytest tests
+├── tests/                  # 158 pytest tests
 ├── scripts/
 │   └── install.sh          # Install/uninstall with --dry-run
 └── data/                   # Local SQLite DB (gitignored)
@@ -255,16 +255,16 @@ uv run cc-memory-server
 
 ### Test Suite
 
-134 tests covering all components:
+158 tests covering all components:
 
 | File | Tests | What it covers |
 |------|-------|---------------|
-| `test_storage.py` | 49 | SQLite + FTS5 CRUD, search, context manager, FTS5 sanitizer |
-| `test_extractor.py` | 23 | JSONL parsing, 5 extractors, privacy filtering |
+| `test_storage.py` | 63 | SQLite + FTS5 CRUD, search, context manager, FTS5 sanitizer, WAL mode, limit clamping, content length, frozen dataclass, DB permissions |
+| `test_extractor.py` | 27 | JSONL parsing, 5 extractors, privacy filtering (SSH keys, connection strings, AWS keys, certificates) |
 | `test_server.py` | 22 | All 6 MCP tools, error handling |
-| `test_user_prompt.py` | 14 | Keyword detection, counters, auto-save |
+| `test_user_prompt.py` | 19 | Keyword detection, counters, auto-save, session ID sanitization |
 | `test_session_start.py` | 13 | Context formatting, memory injection |
-| `test_pre_compact.py` | 11 | Transcript extraction, project detection |
+| `test_pre_compact.py` | 13 | Transcript extraction, project detection, path validation |
 | `test_install.py` | 3 | Install script dry-run and uninstall |
 
 ## How It Fits with MEMORY.md
