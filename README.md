@@ -1,43 +1,295 @@
 # CC-Memory
 
-Persistent memory bank for Claude Code via MCP (Model Context Protocol).
+**Persistent memory bank for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via MCP (Model Context Protocol).**
 
-Automatically captures decisions, file changes, tasks, learnings, and errors from Claude Code sessions. Memories persist across sessions and are searchable via FTS5 full-text search.
+CC-Memory solves the problem of context loss in Claude Code sessions. When you run `/compact` or start a new session, Claude forgets file paths, architectural decisions, task progress, and debugging insights. CC-Memory automatically captures this context and brings it back when you need it.
 
-## Quick Start
+## The Problem
+
+Claude Code's built-in `/compact` command summarizes the conversation but loses:
+- Which files were created or modified
+- What architectural decisions were made and why
+- Active TODO items and task progress
+- Debugging insights and lessons learned
+- Error patterns that were resolved
+
+Starting a new session is even worse -- you begin with zero context about the project's history.
+
+## How CC-Memory Solves It
+
+CC-Memory runs as an MCP server alongside Claude Code and uses three lifecycle hooks to automatically capture and restore context:
+
+```
+                              ┌──────────────────────┐
+                              │   SQLite + FTS5 DB    │
+                              │  ~/.cc-memory/        │
+                              │   memories.db         │
+                              └──────┬───────┬────────┘
+                                     │       │
+              ┌──────────────────────┘       └──────────────────────┐
+              │                                                      │
+    ┌─────────▼──────────┐    ┌──────────────────┐    ┌─────────────▼──────────┐
+    │   PreCompact Hook  │    │  UserPromptSubmit │    │   SessionStart Hook    │
+    │                    │    │      Hook         │    │                        │
+    │  Before /compact:  │    │                   │    │  On new session:       │
+    │  Parse transcript  │    │  On each prompt:  │    │  Query recent memories │
+    │  Extract memories  │    │  Detect keywords  │    │  Format as markdown    │
+    │  Save to DB        │    │  Save decisions   │    │  Inject into context   │
+    └────────────────────┘    └───────────────────┘    └────────────────────────┘
+```
+
+### 1. PreCompact Hook (before `/compact`)
+
+When you run `/compact`, this hook fires first. It parses the full JSONL transcript and extracts:
+
+- **File changes** -- every `Write` and `Edit` tool call with file paths and summaries
+- **Decisions** -- answers to `AskUserQuestion` prompts + patterns like "decided", "chose"
+- **Tasks** -- `TODO:`, `FIXME:`, `NEXT:` patterns + `TaskCreate` tool calls
+- **Errors** -- tool results with `is_error: true`
+- **Learnings** -- patterns like "Insight:", "learned:", "оказалось:"
+
+All extracted memories are saved to the SQLite database before the context is compressed.
+
+### 2. SessionStart Hook (on new session)
+
+When you open Claude Code or resume a session, this hook queries the database for the current project's recent memories and injects them as additional context. Claude receives structured markdown like:
+
+```markdown
+## CC-Memory Context
+**Project:** my-project | **Memories:** 15 | **Last session:** 2026-02-25 14:30:00
+
+### Recent Decisions
+- Chose SQLite for storage (2026-02-25 14:00:00)
+- Using FTS5 for full-text search (2026-02-25 13:45:00)
+
+### Active Tasks
+- TODO: Add migration support
+- Task: Implement caching layer
+
+### Recent File Changes
+- Created src/storage.py
+- Edited src/server.py: 'old code' → 'new code'
+
+### Learnings
+- FTS5 supports Cyrillic text out of the box
+```
+
+### 3. UserPromptSubmit Hook (on each prompt)
+
+Runs on every user message. Two functions:
+
+- **Keyword detection** -- if your prompt contains decision words ("decided", "chose", "решили", "давай") or task words ("нужно", "TODO", "сделай"), it auto-saves the prompt as a memory
+- **Periodic checkpoints** -- every 10 prompts, saves a breadcrumb so you know session length
+
+## MCP Tools (Manual Access)
+
+In addition to automatic hooks, CC-Memory provides 6 MCP tools that Claude can use during a session:
+
+| Tool | Description | Example Use |
+|------|-------------|-------------|
+| `memory_save` | Save a memory manually | "Remember that we chose PostgreSQL for prod" |
+| `memory_search` | Full-text search (FTS5) | "Search memories for authentication" |
+| `memory_recent` | Recent memories for project | "What did we do in the last session?" |
+| `memory_project` | All memories for a project | "Show all decisions for this project" |
+| `memory_session` | Memories from a session | "What happened in session abc-123?" |
+| `memory_forget` | Delete a memory | "Forget memory #42" |
+
+### Memory Types
+
+Each memory has a type that enables filtering:
+
+| Type | Auto-captured from | Description |
+|------|-------------------|-------------|
+| `decision` | AskUserQuestion, keyword patterns | Architectural and design decisions |
+| `file_change` | Write/Edit tool calls | Files created or modified |
+| `task` | TODO/FIXME/NEXT patterns, TaskCreate | Active tasks and TODOs |
+| `learning` | Insight/learned patterns | Debugging insights, TILs |
+| `error` | Tool results with is_error | Errors encountered and resolved |
+| `brainstorm` | Manual save only | Ideas and brainstorming notes |
+
+## Privacy & Security
+
+CC-Memory includes a privacy filter that automatically skips sensitive content:
+
+- `.env` files and their contents
+- Files/content matching `credentials`, `secret`, `password`
+- API keys (`api_key`, `api.key`)
+- Auth tokens (`access_token`, `auth_token`, `bearer_token`)
+- Private keys
+- Content wrapped in `<private>...</private>` tags
+
+The database is stored locally at `~/.cc-memory/memories.db` -- nothing is sent to external services.
+
+## Installation
+
+### Prerequisites
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with MCP support
+- Python 3.12+ (managed by [uv](https://docs.astral.sh/uv/))
+- `jq` (for automatic hook registration)
+
+### Install
 
 ```bash
-# Install
+git clone https://github.com/snjrusmn/cc-memory.git
+cd cc-memory
 ./scripts/install.sh
+```
 
-# Verify
+The install script:
+1. Installs Python dependencies via `uv sync`
+2. Creates the DB directory (`~/.cc-memory/`)
+3. Registers the MCP server with Claude Code
+4. Adds hooks to `~/.claude/settings.json` (preserving existing hooks)
+
+### Verify
+
+```bash
 claude mcp list | grep cc-memory
 ```
 
-## How It Works
+### Uninstall
 
-**Hooks** capture context automatically:
-- **PreCompact** — extracts memories from transcript before `/compact`
-- **SessionStart** — injects recent project memories into new sessions
-- **UserPromptSubmit** — detects decision/task keywords in prompts
+```bash
+./scripts/install.sh --uninstall
+```
 
-**MCP Tools** provide manual access:
-- `memory_save` — save a memory
-- `memory_search` — full-text search
-- `memory_recent` — recent memories for project
-- `memory_project` — all project memories
-- `memory_session` — session memories
-- `memory_forget` — delete a memory
+Removes the MCP server and hooks. Database files are preserved.
 
-## Requirements
+### Dry Run
 
-- Python 3.12+ (managed by uv)
-- Claude Code with MCP support
-- jq (for install script hook merging)
+```bash
+./scripts/install.sh --dry-run
+```
+
+Preview what the install script would do without making changes.
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CC_MEMORY_DB` | `~/.cc-memory/memories.db` | Path to SQLite database |
+
+## Architecture
+
+```
+CC-Memory/
+├── src/cc_memory/
+│   ├── config.py           # Shared DB_PATH and detect_project()
+│   ├── server.py           # FastMCP server (stdio, 6 tools)
+│   ├── storage.py          # SQLite + FTS5 storage layer
+│   ├── extractor.py        # JSONL transcript parser (5 extractors)
+│   └── hooks/
+│       ├── pre_compact.py  # PreCompact: extract & save before /compact
+│       ├── session_start.py # SessionStart: inject memories into context
+│       └── user_prompt.py  # UserPromptSubmit: keyword detection
+├── tests/                  # 134 pytest tests
+├── scripts/
+│   └── install.sh          # Install/uninstall with --dry-run
+└── data/                   # Local SQLite DB (gitignored)
+```
+
+### Storage Layer
+
+Uses SQLite with FTS5 (Full-Text Search 5) for fast text search across all memories:
+
+```sql
+CREATE TABLE memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    project TEXT NOT NULL,
+    type TEXT NOT NULL,  -- decision|file_change|task|learning|error|brainstorm
+    content TEXT NOT NULL,
+    metadata JSON,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE VIRTUAL TABLE memories_fts USING fts5(
+    content, project, type,
+    content=memories, content_rowid=id
+);
+```
+
+FTS5 supports:
+- Full-text search across all memory content
+- Filtering by project and memory type
+- Ranking results by relevance
+- Cyrillic and other Unicode text
+
+### Project Detection
+
+CC-Memory automatically detects the current project by walking up from `cwd` looking for a `.git` directory. If found, uses the git root directory name. Otherwise, uses the current directory name.
+
+### Hook I/O Protocol
+
+All hooks receive JSON on stdin from Claude Code:
+```json
+{
+    "session_id": "abc-123",
+    "cwd": "/path/to/project",
+    "hook_event_name": "PreCompact",
+    "transcript_path": "~/.claude/projects/.../session.jsonl"
+}
+```
+
+Output varies by hook:
+- **PreCompact**: `{"systemMessage": "CC-Memory: saved 12 memories (3 decisions, 5 file_changes, ...)"}`
+- **SessionStart**: `{"hookSpecificOutput": {"additionalContext": "## CC-Memory Context\n..."}}`
+- **UserPromptSubmit**: `{}` (non-blocking, side-effects only)
 
 ## Development
 
 ```bash
-uv sync                    # install dependencies
-uv run pytest tests/ -v    # run tests (134 tests)
+# Install dependencies
+uv sync
+
+# Run tests
+uv run pytest tests/ -v
+
+# Run a specific test file
+uv run pytest tests/test_storage.py -v
+
+# Run MCP server manually
+uv run cc-memory-server
 ```
+
+### Test Suite
+
+134 tests covering all components:
+
+| File | Tests | What it covers |
+|------|-------|---------------|
+| `test_storage.py` | 49 | SQLite + FTS5 CRUD, search, context manager, FTS5 sanitizer |
+| `test_extractor.py` | 23 | JSONL parsing, 5 extractors, privacy filtering |
+| `test_server.py` | 22 | All 6 MCP tools, error handling |
+| `test_user_prompt.py` | 14 | Keyword detection, counters, auto-save |
+| `test_session_start.py` | 13 | Context formatting, memory injection |
+| `test_pre_compact.py` | 11 | Transcript extraction, project detection |
+| `test_install.py` | 3 | Install script dry-run and uninstall |
+
+## How It Fits with MEMORY.md
+
+CC-Memory is designed to **supplement**, not replace, Claude Code's built-in memory system:
+
+| | MEMORY.md | CC-Memory |
+|--|-----------|-----------|
+| **What** | High-level facts, preferences, conventions | Detailed session history, file changes, decisions |
+| **How** | Manual edits | Automatic capture via hooks |
+| **Scope** | Global or per-project | Per-project, cross-session |
+| **Search** | Read entire file | FTS5 full-text search |
+| **Size** | ~200 lines (truncated) | Unlimited (SQLite) |
+
+**MEMORY.md** is for stable knowledge: "Always use pytest", "DB is PostgreSQL".
+**CC-Memory** is for session artifacts: "Created auth middleware in session X", "Chose JWT over sessions because Y".
+
+## Future Enhancements
+
+- Embeddings for semantic search (beyond keyword matching)
+- AI-powered session summarization via Claude Haiku
+- Web UI for browsing and managing memories
+- Cross-machine sync via VPS deployment
+- Integration with Second Brain project
+
+## License
+
+MIT
