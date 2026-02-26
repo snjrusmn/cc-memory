@@ -282,13 +282,41 @@ CC-Memory is designed to **supplement**, not replace, Claude Code's built-in mem
 **MEMORY.md** is for stable knowledge: "Always use pytest", "DB is PostgreSQL".
 **CC-Memory** is for session artifacts: "Created auth middleware in session X", "Chose JWT over sessions because Y".
 
-## Future Enhancements
+## Backlog
 
-- Embeddings for semantic search (beyond keyword matching)
-- AI-powered session summarization via Claude Haiku
-- Web UI for browsing and managing memories
-- Cross-machine sync via VPS deployment
-- Integration with Second Brain project
+> Из сравнительного анализа 7 CC-Memory систем (claude-mem, claude-diary, mcp-memory-service, claude-code-vector-memory, claude-memory-bank, claude-supermemory, claude-user-memory) и PKM-ресёрча (PARA, Zettelkasten, AI-PKM Tools).
+
+### Высокий приоритет
+
+- [ ] **Reflection & Pattern Detection** — `/reflect` команда по модели [claude-diary](https://github.com/rlancemartin/claude-diary). Анализ накопленных memories: 2+ вхождения = паттерн, 3+ = сильный паттерн. Генерация правил для Lessons Learned / CLAUDE.md. Категории: preferences, design decisions, anti-patterns, efficiency lessons, project patterns.
+
+- [ ] **Consolidation & Decay** — по модели [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service). Сжатие старых memories (>90 дней) в summary. Decay scoring: access frequency + recency + memory type. Автоматическая очистка шума при сохранении ценных решений. MCP-инструмент `memory_consolidate`.
+
+### Средний приоритет
+
+- [ ] **Semantic Search (Embeddings)** — sqlite-vec + модель эмбеддингов (MiniLM-L6-v2 через ONNX, локально). Hybrid scoring по модели [claude-code-vector-memory](https://github.com/christian-byrne/claude-code-vector-memory): similarity 70% + recency 20% + complexity 10%. FTS5 остаётся fallback. Новый MCP-инструмент `memory_semantic_search`.
+
+- [ ] **Progressive Disclosure** — 3-layer retrieval по модели [claude-mem](https://github.com/thedotmack/claude-mem): Layer 1 (compact index ~50 tokens) → Layer 2 (timeline) → Layer 3 (full details ~500 tokens). ~10x экономия токенов при SessionStart инжекции. Оптимизация для больших проектов (1000+ memories).
+
+- [ ] **Second Brain Integration** — индексация vault-заметок из Obsidian (markdown → memories). Cross-reference: memory ↔ vault note. MCP-инструмент `memory_vault_search` для поиска по vault + memories одновременно. Двусторонняя связь с [Second Brain](https://github.com/snjrusmn/second-brain) проектом.
+
+### Низкий приоритет
+
+- [ ] **AI Session Summarization** — авто-суммаризация сессии через Claude Haiku при PreCompact. Вместо сырых file_changes → осмысленное описание "что было сделано".
+
+- [ ] **Web UI** — браузерный интерфейс для просмотра и управления memories. Фильтры по проекту/типу/дате. Визуализация паттернов.
+
+- [ ] **Cross-Machine Sync** — синхронизация SQLite через VPS. Одна БД на все машины.
+
+### Источники
+
+| Проект | Что взяли |
+|---|---|
+| [claude-diary](https://github.com/rlancemartin/claude-diary) | Reflect паттерн, diary + pattern detection, PreCompact auto-diary |
+| [claude-mem](https://github.com/thedotmack/claude-mem) | Progressive 3-layer disclosure, ~10x token savings |
+| [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Consolidation + decay, hybrid BM25 + vector, knowledge graph concept |
+| [claude-code-vector-memory](https://github.com/christian-byrne/claude-code-vector-memory) | Hybrid scoring formula (similarity 70% + recency 20% + complexity 10%) |
+| PKM Research (PARA, Zettelkasten, AI-PKM) | Vault integration, semantic search, auto-categorization patterns |
 
 ## License
 
