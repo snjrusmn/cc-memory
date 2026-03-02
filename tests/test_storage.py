@@ -427,3 +427,90 @@ class TestDbPermissions:
         import stat
         mode = db_file.parent.stat().st_mode & 0o777
         assert mode == 0o700
+
+
+# ── recent_balanced ────────────────────────────────────────────
+
+
+class TestRecentBalanced:
+    def _seed_imbalanced(self, storage: Storage) -> None:
+        """Seed storage with imbalanced data — dominated by errors."""
+        # 30 errors (would dominate recent 20)
+        for i in range(30):
+            storage.save(f"s{i}", "proj", "error", f"Error #{i}")
+        # 5 decisions
+        for i in range(5):
+            storage.save(f"s{i}", "proj", "decision", f"Decision #{i}")
+        # 3 tasks
+        for i in range(3):
+            storage.save(f"s{i}", "proj", "task", f"Task #{i}")
+        # 2 learnings
+        storage.save("s1", "proj", "learning", "Learning #1")
+        storage.save("s2", "proj", "learning", "Learning #2")
+        # 1 brainstorm
+        storage.save("s1", "proj", "brainstorm", "Brainstorm #1")
+        # 4 file_changes
+        for i in range(4):
+            storage.save(f"s{i}", "proj", "file_change", f"File change #{i}")
+
+    def test_balanced_retrieval(self, storage):
+        """Should return memories balanced across types, not dominated by errors."""
+        self._seed_imbalanced(storage)
+        results = storage.recent_balanced("proj")
+        types = [m.type for m in results]
+        # Errors should be limited, not dominating
+        assert types.count("error") <= 2
+        # Decisions should be present
+        assert types.count("decision") >= 1
+        # Total should be reasonable (≤22 per spec)
+        assert len(results) <= 22
+
+    def test_respects_per_type_limits(self, storage):
+        """Each type should respect its configured limit."""
+        self._seed_imbalanced(storage)
+        results = storage.recent_balanced("proj")
+        types = [m.type for m in results]
+        assert types.count("decision") <= 5
+        assert types.count("task") <= 5
+        assert types.count("file_change") <= 5
+        assert types.count("learning") <= 3
+        assert types.count("error") <= 2
+        assert types.count("brainstorm") <= 2
+
+    def test_project_with_only_errors(self, storage):
+        """Project with only errors should still return results."""
+        for i in range(20):
+            storage.save(f"s{i}", "proj", "error", f"Error #{i}")
+        results = storage.recent_balanced("proj")
+        assert len(results) == 2  # max 2 errors
+        assert all(m.type == "error" for m in results)
+
+    def test_project_with_no_decisions(self, storage):
+        """Should gracefully handle missing types."""
+        storage.save("s1", "proj", "error", "Error #1")
+        storage.save("s1", "proj", "task", "Task #1")
+        results = storage.recent_balanced("proj")
+        types = {m.type for m in results}
+        assert "error" in types
+        assert "task" in types
+        assert "decision" not in types
+
+    def test_empty_project(self, storage):
+        """Empty project should return empty list."""
+        results = storage.recent_balanced("nonexistent")
+        assert results == []
+
+    def test_recent_method_unchanged(self, storage):
+        """Original recent() method should still work as before."""
+        self._seed_imbalanced(storage)
+        results = storage.recent("proj", limit=20)
+        # Original method returns latest 20 regardless of type
+        assert len(results) == 20
+
+    def test_ordered_by_recency_within_type(self, storage):
+        """Within each type, most recent should come first."""
+        storage.save("s1", "proj", "decision", "Old decision")
+        storage.save("s2", "proj", "decision", "New decision")
+        results = storage.recent_balanced("proj")
+        decisions = [m for m in results if m.type == "decision"]
+        assert decisions[0].content == "New decision"

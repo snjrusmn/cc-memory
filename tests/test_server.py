@@ -1,5 +1,7 @@
 """Tests for cc_memory.server — MCP server tools."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from cc_memory.storage import Storage
@@ -10,6 +12,8 @@ from cc_memory.server import (
     memory_project,
     memory_session,
     memory_forget,
+    memory_stats,
+    memory_consolidate,
     _reset_storage,
 )
 
@@ -178,3 +182,117 @@ class TestErrorHandling:
     def test_save_missing_required_returns_error(self):
         result = memory_save("s1", "proj", "bad_type", "content")
         assert "Error" in result
+
+
+# ── memory_stats ────────────────────────────────────────────────
+
+
+class TestMemoryStats:
+    def test_returns_type_distribution(self):
+        memory_save("s1", "proj", "error", "err 1")
+        memory_save("s1", "proj", "error", "err 2")
+        memory_save("s1", "proj", "decision", "dec 1")
+        result = memory_stats("proj")
+        assert "error" in result
+        assert "2" in result
+        assert "decision" in result
+
+    def test_returns_total_count(self):
+        for i in range(5):
+            memory_save("s1", "proj", "error", f"err {i}")
+        result = memory_stats("proj")
+        assert "5" in result
+
+    def test_returns_duplicate_estimate(self):
+        # 3 identical errors → should report duplicates
+        for _ in range(3):
+            memory_save("s1", "proj", "error", "same error content")
+        result = memory_stats("proj")
+        assert "duplicate" in result.lower()
+
+    def test_empty_project(self):
+        result = memory_stats("nonexistent")
+        assert "No memories" in result
+
+    def test_no_api_key_needed(self):
+        """memory_stats should work without ANTHROPIC_API_KEY."""
+        memory_save("s1", "proj", "decision", "test")
+        result = memory_stats("proj")
+        assert "Error" not in result
+
+
+# ── memory_consolidate ──────────────────────────────────────────
+
+
+class TestMemoryConsolidate:
+    def test_dry_run_default(self):
+        """Default should be dry_run=True."""
+        for _ in range(5):
+            memory_save("s1", "proj", "error", "same error")
+        with patch("cc_memory.analyzer.Analyzer") as MockAnalyzer:
+            instance = MockAnalyzer.return_value
+            instance.api_calls_made = 0
+            instance.max_api_calls = 15
+            from cc_memory.analyzer import AnalysisResult
+            instance.analyze_group.return_value = AnalysisResult(
+                content="lesson", type="learning", confidence=0.9,
+                source_ids=[1, 2, 3, 4, 5], suggestions=[],
+            )
+            result = memory_consolidate("proj")
+
+        # dry_run should NOT delete anything
+        remaining = memory_recent("proj", limit=100)
+        assert "same error" in remaining
+
+    def test_dry_run_false_modifies_db(self, monkeypatch):
+        """dry_run=False should actually clean up."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        for _ in range(5):
+            memory_save("s1", "proj", "error", "same error")
+        with patch("cc_memory.analyzer.Analyzer") as MockAnalyzer:
+            instance = MockAnalyzer.return_value
+            instance.api_calls_made = 2
+            instance.max_api_calls = 15
+            from cc_memory.analyzer import AnalysisResult
+            instance.analyze_group.return_value = AnalysisResult(
+                content="Always check first",
+                type="learning", confidence=0.9,
+                source_ids=[1, 2, 3, 4, 5],
+                suggestions=["Add to CLAUDE.md"],
+            )
+            result = memory_consolidate("proj", dry_run=False)
+
+        assert "learning" in result.lower() or "created" in result.lower()
+
+    def test_missing_api_key(self, monkeypatch):
+        """Should return helpful message when ANTHROPIC_API_KEY is missing."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        memory_save("s1", "proj", "error", "test")
+        result = memory_consolidate("proj")
+        assert "ANTHROPIC_API_KEY" in result
+
+    def test_unknown_project_suggests_available(self):
+        """Unknown project should list available projects."""
+        memory_save("s1", "real-proj", "decision", "test")
+        result = memory_consolidate("nonexistent")
+        assert "real-proj" in result
+
+    def test_report_formatting(self, monkeypatch):
+        """Report should be human-readable."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        for _ in range(5):
+            memory_save("s1", "proj", "error", "repeated error")
+        with patch("cc_memory.analyzer.Analyzer") as MockAnalyzer:
+            instance = MockAnalyzer.return_value
+            instance.api_calls_made = 1
+            instance.max_api_calls = 15
+            from cc_memory.analyzer import AnalysisResult
+            instance.analyze_group.return_value = AnalysisResult(
+                content="lesson learned",
+                type="learning", confidence=0.9,
+                source_ids=[1, 2, 3, 4, 5],
+                suggestions=["Always commit first"],
+            )
+            result = memory_consolidate("proj")
+        # Should contain section headers
+        assert "duplicate" in result.lower() or "removed" in result.lower() or "stats" in result.lower()

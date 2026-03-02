@@ -11,7 +11,11 @@ from cc_memory.storage import Memory, Storage
 
 
 def format_context(project: str, memories: list[Memory]) -> str:
-    """Format memories as structured markdown for Claude context."""
+    """Format memories as structured markdown for Claude context.
+
+    Renders all received memories grouped by type.
+    Per-type limits are enforced at query level (recent_balanced), not here.
+    """
     if not memories:
         return ""
 
@@ -31,31 +35,31 @@ def format_context(project: str, memories: list[Memory]) -> str:
 
     if decisions:
         lines.append("### Recent Decisions")
-        for m in decisions[:10]:
+        for m in decisions:
             lines.append(f"- {m.content} ({m.created_at})")
         lines.append("")
 
     if tasks:
         lines.append("### Active Tasks")
-        for m in tasks[:10]:
+        for m in tasks:
             lines.append(f"- {m.content}")
         lines.append("")
 
     if file_changes:
         lines.append("### Recent File Changes")
-        for m in file_changes[:10]:
+        for m in file_changes:
             lines.append(f"- {m.content}")
         lines.append("")
 
     if learnings:
         lines.append("### Learnings")
-        for m in learnings[:5]:
+        for m in learnings:
             lines.append(f"- {m.content}")
         lines.append("")
 
     if errors:
         lines.append("### Recent Errors")
-        for m in errors[:5]:
+        for m in errors:
             lines.append(f"- {m.content[:200]}")
         lines.append("")
 
@@ -82,7 +86,7 @@ def run(stdin_data: str, db_path: str | None = None) -> dict:
     try:
         with Storage(effective_db) as storage:
             storage.init_db()
-            memories = storage.recent(project, limit=20)
+            memories = storage.recent_balanced(project)
     except Exception as e:
         print(f"CC-Memory warning: {e}", file=sys.stderr)
         return {}

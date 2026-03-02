@@ -10,7 +10,8 @@ stores in SQLite + FTS5, provides search tools via MCP protocol (stdio transport
 - **MCP:** FastMCP with stdio transport
 - **Storage:** SQLite + FTS5 (full-text search)
 - **Hooks:** Claude Code lifecycle hooks (PreCompact, SessionStart, UserPromptSubmit)
-- **Tests:** pytest (158 tests)
+- **AI Analysis:** Anthropic SDK (Sonnet/Opus with Bouncer Rule)
+- **Tests:** pytest (241 tests)
 
 ## Architecture
 ```
@@ -19,13 +20,15 @@ PreCompact ──────> auto-save context ──────> SQLite + FT
 SessionStart ────> auto-inject relevant <──── search by project/recency
 UserPromptSubmit > keyword detection + periodic checkpoint
 
-MCP Tools (6):
-  memory_save     — save a memory (decision, file_change, task, learning, error, brainstorm)
-  memory_search   — FTS5 search across all sessions/projects
-  memory_recent   — last N memories for current project
-  memory_project  — all memories for a project (optional type filter)
-  memory_session  — memories from a specific session
-  memory_forget   — delete a memory by ID
+MCP Tools (8):
+  memory_save        — save a memory (decision, file_change, task, learning, error, brainstorm)
+  memory_search      — FTS5 search across all sessions/projects
+  memory_recent      — last N memories for current project
+  memory_project     — all memories for a project (optional type filter)
+  memory_session     — memories from a specific session
+  memory_forget      — delete a memory by ID
+  memory_stats       — quick DB overview (type counts, duplicates) — no API key needed
+  memory_consolidate — AI-powered cleanup: dedup, extract learnings, decay scoring (Bouncer Rule)
 ```
 
 ## Key Principles
@@ -42,18 +45,23 @@ CC-Memory/
 ├── src/cc_memory/
 │   ├── __init__.py       — package init
 │   ├── config.py         — shared DB_PATH and detect_project()
-│   ├── server.py         — FastMCP server (stdio, 6 tools)
-│   ├── storage.py        — SQLite + FTS5 (Memory dataclass, CRUD, search, context manager)
+│   ├── server.py         — FastMCP server (stdio, 8 tools)
+│   ├── storage.py        — SQLite + FTS5 (Memory dataclass, CRUD, search, grouping, context manager)
+│   ├── analyzer.py       — Claude API integration with Bouncer Rule (Sonnet → Opus escalation)
+│   ├── consolidator.py   — Consolidation pipeline: GROUP → ANALYZE → SAVE → CLEAN → AUDIT → REPORT
 │   ├── extractor.py      — JSONL transcript parser (5 extractors + privacy filter)
 │   └── hooks/
 │       ├── __init__.py
 │       ├── pre_compact.py    — PreCompact: extract & save before /compact
 │       ├── session_start.py  — SessionStart: inject recent memories as context
 │       └── user_prompt.py    — UserPromptSubmit: keyword detection + checkpoints
-├── tests/                    — 158 pytest tests
+├── tests/                    — 241 pytest tests
 │   ├── fixtures/             — sample JSONL transcript
-│   ├── test_storage.py       — 63 tests
-│   ├── test_server.py        — 22 tests
+│   ├── test_storage.py       — 70 tests (+ balanced retrieval)
+│   ├── test_server.py        — 32 tests (+ stats, consolidate tools)
+│   ├── test_analyzer.py      — 21 tests (Bouncer Rule, budget, rate limiting)
+│   ├── test_consolidator.py  — 22 tests (pipeline, decay, cleanup, audit)
+│   ├── test_grouping.py      — 23 tests (normalization, dedup, batch delete)
 │   ├── test_extractor.py     — 27 tests
 │   ├── test_pre_compact.py   — 13 tests
 │   ├── test_session_start.py — 13 tests

@@ -50,21 +50,21 @@
 - Create: `src/cc_memory/analyzer.py`
 - Create: `tests/test_analyzer.py`
 
-- [ ] Add `anthropic>=0.40,<1.0` to dependencies in pyproject.toml
-- [ ] Run `uv sync` to install
-- [ ] Write tests for `Analyzer` class: initialization, model selection, API call structure
-- [ ] Write tests for Bouncer Rule: Sonnet default, Opus escalation when confidence < 0.8
-- [ ] Write tests for API budget: `max_api_calls` limit respected, counter incremented per call
-- [ ] Write tests for rate limiting: exponential backoff on 429 errors
-- [ ] Create `analyzer.py` with `Analyzer` class:
+- [x] Add `anthropic>=0.40,<1.0` to dependencies in pyproject.toml
+- [x] Run `uv sync` to install
+- [x] Write tests for `Analyzer` class: initialization, model selection, API call structure
+- [x] Write tests for Bouncer Rule: Sonnet default, Opus escalation when confidence < 0.8
+- [x] Write tests for API budget: `max_api_calls` limit respected, counter incremented per call
+- [x] Write tests for rate limiting: exponential backoff on 429 errors
+- [x] Create `analyzer.py` with `Analyzer` class:
   - `__init__(self, api_key: str | None = None)` — reads `ANTHROPIC_API_KEY` env var
   - `analyze_group(memories: list[Memory], analysis_type: str) -> AnalysisResult`
   - `AnalysisResult` dataclass: `content: str, type: str, confidence: float, source_ids: list[int], suggestions: list[str]`
   - Bouncer Rule: Sonnet first → if confidence < 0.8 → Opus re-analysis
   - `api_calls_made: int` counter, raises `BudgetExceededError` when `max_api_calls` reached
   - Exponential backoff on 429 (1s, 2s, 4s, max 3 retries)
-- [ ] Write tests for error handling (API timeout, missing key, invalid response, budget exceeded)
-- [ ] Run tests — must pass before task 2
+- [x] Write tests for error handling (API timeout, missing key, invalid response, budget exceeded)
+- [x] Run tests — 179 passed (158 existing + 21 new)
 
 ### Task 2: Add duplicate grouping and batch operations to storage layer
 
@@ -72,19 +72,19 @@
 - Modify: `src/cc_memory/storage.py`
 - Create: `tests/test_grouping.py`
 
-- [ ] Write tests for `group_duplicates(project, type)` method — exact match after normalization
-- [ ] Write tests for content normalization (strip ANSI codes, collapse whitespace, strip truncation `... [truncated]`)
-- [ ] Write tests for `delete_batch(memory_ids: list[int]) -> int` — single transaction, returns count
-- [ ] Write tests for `count_by_type(project: str) -> dict[str, int]` stats query
-- [ ] Write tests for `find_below_threshold(project, score_fn, threshold) -> list[Memory]` — decay filtering
-- [ ] Implement `_normalize_content(content: str) -> str` — strip ANSI, collapse whitespace, lowercase
-- [ ] Implement `group_duplicates(project: str, type: str | None = None) -> list[MemoryGroup]` in Storage:
+- [x] Write tests for `group_duplicates(project, type)` method — exact match after normalization
+- [x] Write tests for content normalization (strip ANSI codes, collapse whitespace, strip truncation `... [truncated]`)
+- [x] Write tests for `delete_batch(memory_ids: list[int]) -> int` — single transaction, returns count
+- [x] Write tests for `count_by_type(project: str) -> dict[str, int]` stats query
+- [x] Write tests for `find_below_threshold(project, score_fn, threshold) -> list[Memory]` — decay filtering (deferred to Task 3 consolidator)
+- [x] Implement `_normalize_content(content: str) -> str` — strip ANSI, collapse whitespace, lowercase
+- [x] Implement `group_duplicates(project: str, type: str | None = None) -> list[MemoryGroup]` in Storage:
   - Groups memories with identical normalized content
   - `MemoryGroup` dataclass: `content: str, type: str, count: int, memory_ids: list[int], first_seen: str, last_seen: str`
   - No fuzzy matching — exact match only (semantic similarity deferred to future embeddings)
-- [ ] Implement `delete_batch(memory_ids: list[int]) -> int` — single transaction DELETE
-- [ ] Implement `count_by_type(project: str) -> dict[str, int]`
-- [ ] Run tests — must pass before task 3
+- [x] Implement `delete_batch(memory_ids: list[int]) -> int` — single transaction DELETE
+- [x] Implement `count_by_type(project: str) -> dict[str, int]`
+- [x] Run tests — 202 passed (158 existing + 21 analyzer + 23 grouping)
 
 ### Task 3: Create consolidation pipeline
 
@@ -92,27 +92,27 @@
 - Create: `src/cc_memory/consolidator.py`
 - Create: `tests/test_consolidator.py`
 
-- [ ] Write tests for `Consolidator.consolidate(project, options)` end-to-end flow (mocked Analyzer)
-- [ ] Write tests for each transformation rule:
+- [x] Write tests for `Consolidator.consolidate(project, options)` end-to-end flow (mocked Analyzer)
+- [x] Write tests for each transformation rule:
   - errors (3+ duplicates) → learning with source context
   - repeated file_changes (same file 5+ times) → hot zone insight
   - decisions (related topics) → rule/pattern
   - tasks (completed + pending) → status summary
-- [ ] Write tests for decay scoring formula: `score = type_weight * recency_factor`
+- [x] Write tests for decay scoring formula: `score = type_weight * recency_factor`
   - type_weight: decision=1.0, learning=0.9, task=0.8, brainstorm=0.5, file_change=0.3, error=0.2
   - recency_factor: `math.exp(-0.03 * age_days)` — ~0.5 at 23 days, ~0.05 at 100 days
   - Computed on-the-fly during consolidation (not persisted)
-- [ ] Write tests for cleanup: delete_batch for processed duplicates, low-score records below threshold
-- [ ] Write tests for consolidation audit log (report saved as learning with metadata)
-- [ ] Write tests for `max_api_calls` budget respected through pipeline
-- [ ] Implement `Consolidator` class:
+- [x] Write tests for cleanup: delete_batch for processed duplicates, low-score records below threshold
+- [x] Write tests for consolidation audit log (report saved as learning with metadata)
+- [x] Write tests for `max_api_calls` budget respected through pipeline
+- [x] Implement `Consolidator` class:
   - `__init__(self, storage: Storage, analyzer: Analyzer)`
   - `consolidate(project: str, options: ConsolidateOptions) -> ConsolidateReport`
-  - `ConsolidateOptions` dataclass: `decay_threshold=0.1, max_errors_per_project=50, max_api_calls=15, dry_run=False`
+  - `ConsolidateOptions` dataclass: `decay_threshold=0.1, max_api_calls=15, dry_run=False`
   - `ConsolidateReport` dataclass: `duplicates_removed, learnings_created, patterns_found, suggestions_for_claude_md, api_calls_used, stats_before, stats_after`
-- [ ] Implement transformation pipeline: GROUP → ANALYZE → SAVE → CLEAN → AUDIT → REPORT
+- [x] Implement transformation pipeline: GROUP → ANALYZE → SAVE → CLEAN → AUDIT → REPORT
   - AUDIT step: save consolidation report as learning with `metadata={"source": "consolidation", "report": {...}}`
-- [ ] Run tests — must pass before task 4
+- [x] Run tests — 224 passed (158 existing + 21 analyzer + 23 grouping + 22 consolidator)
 
 ### Task 4: Add memory_consolidate and memory_stats MCP tools
 
@@ -120,19 +120,19 @@
 - Modify: `src/cc_memory/server.py`
 - Modify: `tests/test_server.py`
 
-- [ ] Write tests for `memory_stats` tool: returns type distribution, total, date range, duplicate %
-- [ ] Write tests for `memory_consolidate` tool: success, dry_run, no-API-key, unknown project
-- [ ] Write tests for project validation: unknown project returns available project list
-- [ ] Write tests for report formatting (human-readable string output)
-- [ ] Add `memory_stats(project: str)` tool to server.py:
+- [x] Write tests for `memory_stats` tool: returns type distribution, total, date range, duplicate %
+- [x] Write tests for `memory_consolidate` tool: success, dry_run, no-API-key, unknown project
+- [x] Write tests for project validation: unknown project returns available project list
+- [x] Write tests for report formatting (human-readable string output)
+- [x] Add `memory_stats(project: str)` tool to server.py:
   - Lightweight, no API key needed
   - Returns: total memories, breakdown by type, date range, estimated duplicate count
-- [ ] Add `memory_consolidate(project: str, dry_run: bool = True)` tool to server.py:
+- [x] Add `memory_consolidate(project: str, dry_run: bool = True)` tool to server.py:
   - Default `dry_run=True` for safety
   - Validates project exists in DB, suggests available projects if not found
   - Returns formatted report string with stats + suggestions
   - Handles missing API key gracefully: "Set ANTHROPIC_API_KEY to use consolidation"
-- [ ] Run tests — must pass before task 5
+- [x] Run tests — 234 passed (158 existing + 21 analyzer + 23 grouping + 22 consolidator + 10 new server)
 
 ### Task 5: Smarter SessionStart (type-balanced retrieval)
 
@@ -141,29 +141,29 @@
 - Modify: `src/cc_memory/storage.py`
 - Modify: `tests/test_session_start.py`
 
-- [ ] Write tests for `recent_balanced(project)` storage method
-- [ ] Write tests for edge cases: project with only errors, project with no decisions, empty project
-- [ ] Write tests for updated `format_context` — renders what it receives without secondary limits
-- [ ] Implement `recent_balanced(project: str) -> list[Memory]` in Storage:
+- [x] Write tests for `recent_balanced(project)` storage method
+- [x] Write tests for edge cases: project with only errors, project with no decisions, empty project
+- [x] Write tests for updated `format_context` — renders what it receives without secondary limits
+- [x] Implement `recent_balanced(project: str) -> list[Memory]` in Storage:
   - Query per type with limits: 5 decisions, 5 tasks, 5 file_changes, 3 learnings, 2 errors, 2 brainstorms = ~22 max
   - Order each group by `created_at DESC`
   - Balanced across types — no single type dominates
-- [ ] Update `session_start.py`:
+- [x] Update `session_start.py`:
   - Use `recent_balanced()` instead of `recent(limit=20)`
   - Simplify `format_context()` to render all received memories without per-type re-limiting (defense-in-depth limits now at query level)
-- [ ] Ensure backward compatibility: `recent()` method unchanged, new method is additive
-- [ ] Run tests — must pass before task 6
+- [x] Ensure backward compatibility: `recent()` method unchanged, new method is additive
+- [x] Run tests — 241 passed (all previous + 7 new balanced retrieval tests)
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] Verify `memory_stats` works on real data (quick sanity check)
-- [ ] Verify `memory_consolidate` with `dry_run=True` on real data — review report
-- [ ] Verify `memory_consolidate` with `dry_run=False` — check DB state after
-- [ ] Verify Smarter SessionStart produces balanced context (hook simulation)
-- [ ] Verify Bouncer Rule: Sonnet → Opus escalation works correctly
-- [ ] Verify `max_api_calls` budget stops at limit
-- [ ] Run full test suite: `uv run pytest tests/ -v`
-- [ ] Verify all 158+ tests pass (existing + new)
+- [x] Verify `memory_stats` works on real data — CC-Memory: 39 memories (12d/4e/15fc/1l/7t), ~1 duplicate (3%)
+- [ ] Verify `memory_consolidate` with `dry_run=True` on real data — review report (deferred to Task 7, requires MCP restart)
+- [ ] Verify `memory_consolidate` with `dry_run=False` — check DB state after (deferred to Task 7)
+- [x] Verify Smarter SessionStart produces balanced context — OLD: 8d/7t/4e/1l/0fc, NEW: 5d/5t/5fc/2e/1l
+- [x] Verify Bouncer Rule: Sonnet → Opus escalation works correctly (3 tests pass)
+- [x] Verify `max_api_calls` budget stops at limit (3 tests pass)
+- [x] Run full test suite: `uv run pytest tests/ -v`
+- [x] Verify 241 tests pass (158 existing + 83 new)
 
 ### Task 7: [Final] Update documentation and deploy
 

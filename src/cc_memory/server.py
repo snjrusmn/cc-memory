@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import atexit
+import logging
+import os
 
 from mcp.server.fastmcp import FastMCP
 
 from cc_memory.config import DB_PATH
 from cc_memory.storage import Storage, VALID_TYPES, MAX_LIMIT
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP("cc-memory")
 
@@ -163,6 +167,117 @@ def memory_forget(
     if storage.delete(memory_id):
         return f"Deleted memory #{memory_id}."
     return f"Memory #{memory_id} not found."
+
+
+@mcp.tool()
+def memory_stats(
+    project: str,
+) -> str:
+    """Get quick DB overview for a project — no API key needed.
+
+    Returns: total memories, breakdown by type, date range, estimated duplicate count.
+
+    Args:
+        project: Project name
+    """
+    storage = get_storage()
+    counts = storage.count_by_type(project)
+    if not counts:
+        return f"No memories for project '{project}'."
+
+    total = sum(counts.values())
+    lines = [f"## Stats for '{project}'", f"**Total:** {total} memories", "", "**By type:**"]
+    for t in sorted(counts.keys()):
+        lines.append(f"  - {t}: {counts[t]}")
+
+    # Duplicate estimate
+    groups = storage.group_duplicates(project)
+    dup_groups = [g for g in groups if g.count > 1]
+    dup_count = sum(g.count - 1 for g in dup_groups)  # extras beyond first
+    if dup_count:
+        pct = round(dup_count / total * 100)
+        lines.append(f"\n**Duplicates:** ~{dup_count} ({pct}% of total)")
+    else:
+        lines.append("\n**Duplicates:** none detected")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def memory_consolidate(
+    project: str,
+    dry_run: bool = True,
+) -> str:
+    """Consolidate memories: deduplicate, extract learnings, clean low-value records.
+
+    AI-powered analysis (Sonnet, Opus fallback via Bouncer Rule).
+    Default dry_run=True for safety — shows what WOULD happen without modifying DB.
+
+    Args:
+        project: Project name to consolidate
+        dry_run: If True (default), preview changes without modifying DB
+    """
+    storage = get_storage()
+
+    # Validate project exists
+    counts = storage.count_by_type(project)
+    if not counts:
+        # Suggest available projects
+        all_rows = storage.conn.execute(
+            "SELECT DISTINCT project FROM memories ORDER BY project"
+        ).fetchall()
+        projects = [r["project"] for r in all_rows]
+        if projects:
+            return f"Project '{project}' not found. Available projects: {', '.join(projects)}"
+        return f"No memories in database."
+
+    # Check API key
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return (
+            "Set ANTHROPIC_API_KEY environment variable to use consolidation.\n"
+            "Consolidation uses Claude API (Sonnet/Opus) to analyze patterns in your memories."
+        )
+
+    # Import here to avoid import errors when API key is missing
+    from cc_memory.analyzer import Analyzer
+    from cc_memory.consolidator import Consolidator, ConsolidateOptions
+
+    try:
+        analyzer = Analyzer(api_key=api_key)
+        consolidator = Consolidator(storage, analyzer)
+        options = ConsolidateOptions(dry_run=dry_run)
+        report = consolidator.consolidate(project, options)
+    except Exception as e:
+        logger.error("Consolidation failed: %s", e)
+        return f"Consolidation error: {e}"
+
+    # Format report
+    mode = "DRY RUN" if dry_run else "APPLIED"
+    lines = [
+        f"## Consolidation Report [{mode}]",
+        f"**Project:** {project}",
+        f"**Duplicates removed:** {report.duplicates_removed}",
+        f"**Learnings created:** {report.learnings_created}",
+        f"**Patterns found:** {report.patterns_found}",
+        f"**API calls used:** {report.api_calls_used}",
+    ]
+
+    if report.stats_before:
+        lines.append(f"\n**Before:** {report.stats_before}")
+    if report.stats_after:
+        lines.append(f"**After:** {report.stats_after}")
+
+    if report.suggestions_for_claude_md:
+        lines.append("\n## Suggestions for CLAUDE.md")
+        lines.append("Add to project CLAUDE.md:")
+        for s in report.suggestions_for_claude_md:
+            lines.append(f'- "{s}"')
+
+    if dry_run:
+        lines.append("\n*This was a dry run. Use `memory_consolidate(project, dry_run=False)` to apply changes.*")
+
+    return "\n".join(lines)
 
 
 def main() -> None:

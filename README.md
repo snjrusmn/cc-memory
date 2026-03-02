@@ -288,6 +288,13 @@ CC-Memory is designed to **supplement**, not replace, Claude Code's built-in mem
 
 ### Высокий приоритет
 
+- [ ] **Cross-Machine Sync (Mac ↔ VPS)** — консистентная память между всеми машинами. Подходы:
+  - **A) Litestream** — streaming replication SQLite → S3/VPS. Один master (Mac), VPS read-only replica. Простейший вариант.
+  - **B) HTTP Sync API** — легковесный REST endpoint на VPS (`POST /sync`, `GET /pull`). Mac пушит diff по крону или при PreCompact. Двусторонняя синхронизация.
+  - **C) rsync по крону** — простейший: `rsync ~/.cc-memory/memories.db root@vps:~/.cc-memory/` каждые N минут. Минус: конфликты при одновременной записи.
+  - **D) Shared SQLite via NFS/SSHFS** — маунтить VPS-папку на маке. Минус: latency, WAL mode issues over network.
+  - **Рекомендация:** Вариант B (HTTP Sync API) — надёжный, двусторонний, conflict resolution через timestamps.
+
 - [ ] **Reflection & Pattern Detection** — `/reflect` команда по модели [claude-diary](https://github.com/rlancemartin/claude-diary). Анализ накопленных memories: 2+ вхождения = паттерн, 3+ = сильный паттерн. Генерация правил для Lessons Learned / CLAUDE.md. Категории: preferences, design decisions, anti-patterns, efficiency lessons, project patterns.
 
 - [ ] **Consolidation & Decay** — по модели [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service). Сжатие старых memories (>90 дней) в summary. Decay scoring: access frequency + recency + memory type. Автоматическая очистка шума при сохранении ценных решений. MCP-инструмент `memory_consolidate`.
@@ -305,8 +312,6 @@ CC-Memory is designed to **supplement**, not replace, Claude Code's built-in mem
 - [ ] **AI Session Summarization** — авто-суммаризация сессии через Claude Haiku при PreCompact. Вместо сырых file_changes → осмысленное описание "что было сделано".
 
 - [ ] **Web UI** — браузерный интерфейс для просмотра и управления memories. Фильтры по проекту/типу/дате. Визуализация паттернов.
-
-- [ ] **Cross-Machine Sync** — синхронизация SQLite через VPS. Одна БД на все машины.
 
 ### Источники
 

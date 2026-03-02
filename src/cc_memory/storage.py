@@ -26,6 +26,18 @@ class Memory:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryGroup:
+    """A group of memories with identical normalized content."""
+
+    content: str
+    type: str
+    count: int
+    memory_ids: list[int]
+    first_seen: str
+    last_seen: str
+
+
 VALID_TYPES = frozenset(
     {"decision", "file_change", "task", "learning", "error", "brainstorm"}
 )
@@ -33,9 +45,26 @@ VALID_TYPES = frozenset(
 MAX_LIMIT = 500
 MAX_CONTENT_LENGTH = 50_000
 
+# ANSI escape sequences
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
 # Characters/words that need escaping in FTS5 queries
 _FTS5_SPECIAL = re.compile(r'["\'\*\(\)\{\}\+\:\^\-\.\\;/]')
 _FTS5_KEYWORDS = {"AND", "OR", "NOT", "NEAR"}
+
+
+def _normalize_content(content: str) -> str:
+    """Normalize content for duplicate detection: strip ANSI, collapse whitespace, lowercase."""
+    if not content:
+        return ""
+    # Strip ANSI escape codes
+    text = _ANSI_RE.sub("", content)
+    # Strip truncation marker
+    text = text.replace("... [truncated]", "...")
+    # Collapse whitespace
+    text = " ".join(text.split())
+    # Lowercase
+    return text.lower().strip()
 
 
 def _sanitize_fts_query(query: str) -> str:
@@ -205,6 +234,31 @@ class Storage:
             ).fetchall()
         return [self._row_to_memory(r) for r in rows]
 
+    # Per-type limits for balanced retrieval
+    _BALANCED_LIMITS: dict[str, int] = {
+        "decision": 5,
+        "task": 5,
+        "file_change": 5,
+        "learning": 3,
+        "error": 2,
+        "brainstorm": 2,
+    }
+
+    def recent_balanced(self, project: str) -> list[Memory]:
+        """Get recent memories balanced across types — no single type dominates.
+
+        Returns up to ~22 memories with per-type limits:
+        5 decisions, 5 tasks, 5 file_changes, 3 learnings, 2 errors, 2 brainstorms.
+        """
+        result: list[Memory] = []
+        for mem_type, limit in self._BALANCED_LIMITS.items():
+            rows = self.conn.execute(
+                "SELECT * FROM memories WHERE project = ? AND type = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+                (project, mem_type, limit),
+            ).fetchall()
+            result.extend(self._row_to_memory(r) for r in rows)
+        return result
+
     def by_session(self, session_id: str, limit: int = 50) -> list[Memory]:
         """Get all memories for a session."""
         limit = self._clamp_limit(limit)
@@ -213,6 +267,62 @@ class Storage:
             (session_id, limit),
         ).fetchall()
         return [self._row_to_memory(r) for r in rows]
+
+    def group_duplicates(
+        self, project: str, type: str | None = None,
+    ) -> list[MemoryGroup]:
+        """Group memories with identical normalized content."""
+        conditions = ["project = ?"]
+        params: list[Any] = [project]
+        if type:
+            conditions.append("type = ?")
+            params.append(type)
+        where = " AND ".join(conditions)
+
+        rows = self.conn.execute(
+            f"SELECT id, type, content, created_at FROM memories WHERE {where} ORDER BY created_at",
+            params,
+        ).fetchall()
+
+        # Group by normalized content + type
+        groups: dict[tuple[str, str], list[tuple[int, str]]] = {}
+        for row in rows:
+            key = (_normalize_content(row["content"]), row["type"])
+            if key not in groups:
+                groups[key] = []
+            groups[key].append((row["id"], row["created_at"]))
+
+        result = []
+        for (norm_content, mem_type), entries in groups.items():
+            result.append(MemoryGroup(
+                content=norm_content,
+                type=mem_type,
+                count=len(entries),
+                memory_ids=[e[0] for e in entries],
+                first_seen=entries[0][1],
+                last_seen=entries[-1][1],
+            ))
+        return result
+
+    def delete_batch(self, memory_ids: list[int]) -> int:
+        """Delete multiple memories in a single transaction. Returns count deleted."""
+        if not memory_ids:
+            return 0
+        placeholders = ",".join("?" for _ in memory_ids)
+        cur = self.conn.execute(
+            f"DELETE FROM memories WHERE id IN ({placeholders})",
+            memory_ids,
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def count_by_type(self, project: str) -> dict[str, int]:
+        """Count memories by type for a project."""
+        rows = self.conn.execute(
+            "SELECT type, COUNT(*) as cnt FROM memories WHERE project = ? GROUP BY type",
+            (project,),
+        ).fetchall()
+        return {row["type"]: row["cnt"] for row in rows}
 
     def delete(self, memory_id: int) -> bool:
         """Delete a memory by id. Returns True if deleted."""
