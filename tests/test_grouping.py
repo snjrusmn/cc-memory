@@ -7,16 +7,7 @@ import pytest
 from cc_memory.storage import Storage, MemoryGroup, _normalize_content
 
 
-# ── Fixtures ────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def storage():
-    """In-memory storage for tests."""
-    s = Storage(":memory:")
-    s.init_db()
-    yield s
-    s.close()
+# Note: `storage` fixture is provided by conftest.py
 
 
 def _seed_duplicates(storage: Storage) -> None:

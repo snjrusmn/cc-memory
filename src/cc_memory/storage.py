@@ -324,6 +324,24 @@ class Storage:
         ).fetchall()
         return {row["type"]: row["cnt"] for row in rows}
 
+    def get_by_ids(self, memory_ids: list[int]) -> list[Memory]:
+        """Fetch full Memory objects by their IDs."""
+        if not memory_ids:
+            return []
+        placeholders = ",".join("?" for _ in memory_ids)
+        rows = self.conn.execute(
+            f"SELECT * FROM memories WHERE id IN ({placeholders})",
+            memory_ids,
+        ).fetchall()
+        return [self._row_to_memory(r) for r in rows]
+
+    def list_projects(self) -> list[str]:
+        """List all distinct project names in the database."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT project FROM memories ORDER BY project"
+        ).fetchall()
+        return [r["project"] for r in rows]
+
     def delete(self, memory_id: int) -> bool:
         """Delete a memory by id. Returns True if deleted."""
         cur = self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))

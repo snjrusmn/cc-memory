@@ -11,7 +11,7 @@ stores in SQLite + FTS5, provides search tools via MCP protocol (stdio transport
 - **Storage:** SQLite + FTS5 (full-text search)
 - **Hooks:** Claude Code lifecycle hooks (PreCompact, SessionStart, UserPromptSubmit)
 - **AI Analysis:** Anthropic SDK (Sonnet/Opus with Bouncer Rule)
-- **Tests:** pytest (241 tests)
+- **Tests:** pytest (245 tests)
 
 ## Architecture
 ```
@@ -55,7 +55,7 @@ CC-Memory/
 │       ├── pre_compact.py    — PreCompact: extract & save before /compact
 │       ├── session_start.py  — SessionStart: inject recent memories as context
 │       └── user_prompt.py    — UserPromptSubmit: keyword detection + checkpoints
-├── tests/                    — 241 pytest tests
+├── tests/                    — 245 pytest tests
 │   ├── fixtures/             — sample JSONL transcript
 │   ├── test_storage.py       — 70 tests (+ balanced retrieval)
 │   ├── test_server.py        — 32 tests (+ stats, consolidate tools)

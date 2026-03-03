@@ -49,6 +49,22 @@ class TestMemorySave:
             result = memory_save("s1", "proj", t, f"content for {t}")
             assert "Saved memory" in result
 
+    def test_empty_session_id_rejected(self):
+        result = memory_save("", "proj", "decision", "content")
+        assert "Error" in result
+
+    def test_empty_project_rejected(self):
+        result = memory_save("s1", "", "decision", "content")
+        assert "Error" in result
+
+    def test_empty_content_rejected(self):
+        result = memory_save("s1", "proj", "decision", "")
+        assert "Error" in result
+
+    def test_whitespace_only_rejected(self):
+        result = memory_save("s1", "proj", "decision", "   ")
+        assert "Error" in result
+
 
 # ── memory_search ────────────────────────────────────────────────
 

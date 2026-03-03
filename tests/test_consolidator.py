@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,15 +21,7 @@ from cc_memory.storage import Memory, Storage
 
 
 # ── Fixtures ────────────────────────────────────────────────────
-
-
-@pytest.fixture
-def storage():
-    """In-memory storage for tests."""
-    s = Storage(":memory:")
-    s.init_db()
-    yield s
-    s.close()
+# Note: `storage` fixture is provided by conftest.py
 
 
 @pytest.fixture
@@ -122,7 +114,7 @@ class TestConsolidateReport:
 class TestDecayScore:
     def test_fresh_decision_has_max_score(self):
         """A decision created just now should have score ≈ 1.0."""
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         m = Memory(id=1, session_id="s", project="p", type="decision",
                    content="test", metadata=None, created_at=now)
         score = decay_score(m)
@@ -130,7 +122,7 @@ class TestDecayScore:
 
     def test_old_error_has_low_score(self):
         """A 100-day-old error should have very low score."""
-        old = (datetime.utcnow() - timedelta(days=100)).strftime("%Y-%m-%d %H:%M:%S")
+        old = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=100)).strftime("%Y-%m-%d %H:%M:%S")
         m = Memory(id=1, session_id="s", project="p", type="error",
                    content="test", metadata=None, created_at=old)
         score = decay_score(m)
@@ -138,7 +130,7 @@ class TestDecayScore:
 
     def test_type_weights_applied(self):
         """Decision (weight=1.0) should score higher than error (weight=0.2) at same age."""
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         decision = Memory(id=1, session_id="s", project="p", type="decision",
                           content="test", metadata=None, created_at=now)
         error = Memory(id=2, session_id="s", project="p", type="error",
@@ -147,7 +139,7 @@ class TestDecayScore:
 
     def test_recency_factor_at_23_days(self):
         """At 23 days, recency should be approximately 0.5."""
-        age_23 = (datetime.utcnow() - timedelta(days=23)).strftime("%Y-%m-%d %H:%M:%S")
+        age_23 = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=23)).strftime("%Y-%m-%d %H:%M:%S")
         m = Memory(id=1, session_id="s", project="p", type="decision",
                    content="test", metadata=None, created_at=age_23)
         score = decay_score(m)
@@ -162,7 +154,7 @@ class TestDecayScore:
 
     def test_unknown_type_uses_default_weight(self):
         """Unknown types should use default weight of 0.3."""
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         m = Memory(id=1, session_id="s", project="p", type="brainstorm",
                    content="test", metadata=None, created_at=now)
         score = decay_score(m)
@@ -330,7 +322,7 @@ class TestTransformationRules:
 
 class TestCleanup:
     def test_processed_duplicates_deleted(self, storage, mock_analyzer):
-        """After analysis, duplicate errors should be removed (keeping learnings)."""
+        """After analysis, duplicates removed but 1 original kept for traceability."""
         _seed_errors(storage, 5)
 
         mock_analyzer.analyze_group.return_value = AnalysisResult(
@@ -342,9 +334,10 @@ class TestCleanup:
         consolidator = Consolidator(storage, mock_analyzer)
         report = consolidator.consolidate("proj-a", ConsolidateOptions())
 
-        # Original 5 errors should be removed
+        # 4 duplicates removed, 1 original kept for traceability
         remaining_errors = storage.by_project("proj-a", type="error")
-        assert len(remaining_errors) == 0
+        assert len(remaining_errors) == 1
+        assert report.duplicates_removed == 4
         # New learning should exist
         learnings = storage.by_project("proj-a", type="learning")
         assert len(learnings) >= 1
@@ -356,7 +349,7 @@ class TestCleanup:
             storage.save(f"s{i}", "proj-a", "error", f"Old error {i}")
 
         # Manually set created_at to 120 days ago
-        old_date = (datetime.utcnow() - timedelta(days=120)).strftime("%Y-%m-%d %H:%M:%S")
+        old_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=120)).strftime("%Y-%m-%d %H:%M:%S")
         storage.conn.execute(
             "UPDATE memories SET created_at = ? WHERE project = ?",
             (old_date, "proj-a"),

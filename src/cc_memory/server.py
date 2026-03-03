@@ -56,6 +56,12 @@ def memory_save(
         content: The memory text to save
         metadata: Optional structured data (JSON object)
     """
+    if not session_id or not session_id.strip():
+        return "Error: session_id cannot be empty"
+    if not project or not project.strip():
+        return "Error: project cannot be empty"
+    if not content or not content.strip():
+        return "Error: content cannot be empty"
     storage = get_storage()
     try:
         mid = storage.save(session_id, project, type, content, metadata)
@@ -223,10 +229,7 @@ def memory_consolidate(
     counts = storage.count_by_type(project)
     if not counts:
         # Suggest available projects
-        all_rows = storage.conn.execute(
-            "SELECT DISTINCT project FROM memories ORDER BY project"
-        ).fetchall()
-        projects = [r["project"] for r in all_rows]
+        projects = storage.list_projects()
         if projects:
             return f"Project '{project}' not found. Available projects: {', '.join(projects)}"
         return f"No memories in database."

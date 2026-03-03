@@ -9,7 +9,7 @@ import json
 import logging
 import math
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from cc_memory.analyzer import AnalysisResult, Analyzer, BudgetExceededError
@@ -53,7 +53,7 @@ def decay_score(memory: Memory) -> float:
         created = datetime.strptime(memory.created_at, "%Y-%m-%d %H:%M:%S")
     except (ValueError, TypeError):
         return 0.0
-    age_days = max(0, (datetime.utcnow() - created).days)
+    age_days = max(0, (datetime.now(timezone.utc).replace(tzinfo=None) - created).days)
     recency = math.exp(-0.03 * age_days)
     weight = TYPE_WEIGHTS.get(memory.type, 0.3)
     return weight * recency
@@ -163,17 +163,17 @@ class Consolidator:
                 )
                 learnings_created += 1
 
-            # Collect IDs for cleanup (even in dry_run for reporting)
-            ids_to_delete.extend(group.memory_ids)
-            duplicates_removed += group.count
+            # Collect duplicate IDs for cleanup — keep first (oldest) as evidence
+            ids_to_delete.extend(group.memory_ids[1:])
+            duplicates_removed += group.count - 1
 
-        # ── DECAY CLEANUP ──────────────────────────────────
-        decay_deleted = self._cleanup_low_score(project, options)
-        duplicates_removed += decay_deleted
-
-        # ── CLEAN ──────────────────────────────────────────
+        # ── CLEAN (batch delete analyzed duplicates first) ──
         if not options.dry_run and ids_to_delete:
             self._storage.delete_batch(ids_to_delete)
+
+        # ── DECAY CLEANUP (after batch delete to avoid double-counting) ──
+        decay_deleted = self._cleanup_low_score(project, options)
+        duplicates_removed += decay_deleted
 
         # ── AUDIT ──────────────────────────────────────────
         stats_after = self._storage.count_by_type(project)
@@ -195,14 +195,7 @@ class Consolidator:
 
     def _fetch_memories_by_ids(self, memory_ids: list[int]) -> list[Memory]:
         """Fetch full Memory objects by their IDs."""
-        if not memory_ids:
-            return []
-        placeholders = ",".join("?" for _ in memory_ids)
-        rows = self._storage.conn.execute(
-            f"SELECT * FROM memories WHERE id IN ({placeholders})",
-            memory_ids,
-        ).fetchall()
-        return [self._storage._row_to_memory(r) for r in rows]
+        return self._storage.get_by_ids(memory_ids)
 
     def _cleanup_low_score(
         self, project: str, options: ConsolidateOptions,
